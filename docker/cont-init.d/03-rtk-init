@@ -1,0 +1,12 @@
+#!/command/with-contenv sh
+# shellcheck shell=sh
+
+# Initialize rtk for hermes agent if rtk is available.
+# This script is executed by s6-overlay during container init.
+
+if command -v rtk >/dev/null 2>&1; then
+    echo "[03-rtk-init] rtk found, running: rtk init -g --agent hermes"
+    s6-setuidgid hermes rtk init -g --agent hermes
+else
+    echo "[03-rtk-init] rtk not found, skipping initialization"
+fi

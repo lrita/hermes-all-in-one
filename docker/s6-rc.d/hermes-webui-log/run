@@ -1,0 +1,28 @@
+#!/command/with-contenv sh
+# shellcheck shell=sh
+# Hermes WebUI logger service.
+#
+# Consumes hermes-webui's stdout/stderr (via s6-rc producer-for /
+# consumer-for wiring) and persists them with rotation to
+# ${HERMES_WEBUI_STATE_DIR}/logs/webui.
+#
+# 参考 hermes-agent 中 service_manager.py::_render_log_run 的写法：
+# - 通过 with-contenv 在运行时解析 HERMES_WEBUI_STATE_DIR，避免把
+#   构建期路径硬编码进脚本。
+# - 使用 s6-log n10 s1000000 T 做按大小滚动 + ISO 时间戳。
+
+: "${HERMES_WEBUI_STATE_DIR:=/opt/data/webui}"
+
+log_dir="${HERMES_WEBUI_STATE_DIR}/logs/webui"
+
+mkdir -p "$log_dir"
+chown -R hermes:hermes "$log_dir" 2>/dev/null || true
+
+# 参数说明：
+#   n10        最多保留 10 份归档日志
+#   s1000000   单文件超过 ~1MB 触发滚动
+#   T          每行前置 ISO 8601 本地时间戳
+# 注意：不要带 -d<N>，那是给 fd N 写 readiness 通知用的，
+# s6-rc 不会为该 service 打开额外 fd，会直接报
+# "s6-log: fatal: invalid notification fd: Bad file descriptor"。
+exec s6-setuidgid hermes s6-log n10 s1000000 T "$log_dir"

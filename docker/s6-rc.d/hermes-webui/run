@@ -1,0 +1,22 @@
+#!/command/with-contenv sh
+# shellcheck shell=sh
+# Hermes WebUI service.
+#
+# Long-running supervised service that boots the hermes-webui server
+# (https://github.com/nesquena/hermes-webui).
+
+cd "${HERMES_WEBUI_DIR:-/opt/hermes-webui}" || exit 1
+
+# shellcheck disable=SC1091
+. /opt/hermes/.venv/bin/activate
+
+# Redirect stderr to stdout so the s6-rc consumer (hermes-webui-log)
+# receives both streams via the producer/consumerpipe — s6-log only
+# reads stdout. Without this, tracebacks and warnings would be lost
+# to the catch-all logger instead of landing in the persistent
+# ${HERMES_WEBUI_STATE_DIR}/logs/webui directory.
+exec 2>&1
+
+# Exec replaces the shell so s6-supervise tracks the python process
+# directly (clean signal delivery, accurate PID for s6-svstat).
+exec python3 server.py
