@@ -11,6 +11,8 @@
 #   构建期路径硬编码进脚本。
 # - 使用 s6-log n10 s1000000 T 做按大小滚动 + ISO 时间戳。
 
+export HOME=/opt/data
+
 : "${HERMES_WEBUI_STATE_DIR:=/opt/data/webui}"
 
 log_dir="${HERMES_WEBUI_STATE_DIR}/logs/webui"

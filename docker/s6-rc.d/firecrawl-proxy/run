@@ -1,0 +1,37 @@
+#!/command/with-contenv sh
+# shellcheck shell=sh
+# Firecrawl Proxy service.
+#
+# Long-running supervised service that boots the firecrawl-proxy server
+# (https://github.com/lrita/firecrawl_proxy).
+#
+# Transparent forward proxy for Firecrawl API with multi API Key rotation
+# and 4xx automatic Key switching retry.
+
+export HOME=/opt/data
+
+: "${FIRECRAWL_PROXY_HOST:=127.0.0.1}"
+: "${FIRECRAWL_PROXY_PORT:=3000}"
+: "${FIRECRAWL_PROXY_DIR:=/opt/firecrawl-proxy}"
+
+cd "${FIRECRAWL_PROXY_DIR}" || exit 1
+
+# shellcheck disable=SC1091
+. /opt/hermes/.venv/bin/activate
+
+# Redirect stderr to stdout so the s6-rc consumer (firecrawl-proxy-log)
+# receives both streams via the producer/consumer pipe — s6-log only
+# reads stdout.
+exec 2>&1
+
+# Run as hermes user when root; when container runs rootless (no CAP_SETGID),
+# s6-setuidgid's setgroups() fails causing s6 restart loop, so exec directly.
+# Exec replaces shell so s6-supervise directly tracks the python process
+# (clean signals, accurate PID).
+[ "$(id -u)" = 0 ] || exec firecrawl-proxy \
+    --host "${FIRECRAWL_PROXY_HOST}" \
+    --port "${FIRECRAWL_PROXY_PORT}"
+
+exec s6-setuidgid hermes firecrawl-proxy \
+    --host "${FIRECRAWL_PROXY_HOST}" \
+    --port "${FIRECRAWL_PROXY_PORT}"

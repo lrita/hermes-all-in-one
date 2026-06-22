@@ -5,6 +5,8 @@
 # Long-running supervised service that boots the hermes-webui server
 # (https://github.com/nesquena/hermes-webui).
 
+export HOME=/opt/data
+
 cd "${HERMES_WEBUI_DIR:-/opt/hermes-webui}" || exit 1
 
 # shellcheck disable=SC1091
@@ -17,6 +19,9 @@ cd "${HERMES_WEBUI_DIR:-/opt/hermes-webui}" || exit 1
 # ${HERMES_WEBUI_STATE_DIR}/logs/webui directory.
 exec 2>&1
 
-# Exec replaces the shell so s6-supervise tracks the python process
-# directly (clean signal delivery, accurate PID for s6-svstat).
-exec python3 server.py
+# 参考 hermes-agent service_manager.py::_render_run：以 hermes 身份运行。
+# 当容器以非 root 启动时（已无 CAP_SETGID），s6-setuidgid 的 setgroups()
+# 会失败导致 s6 启动循环，此时直接 exec 即可。Exec 替换 shell 让
+# s6-supervise 直接追踪 python 进程（信号传递干净、PID 准确）。
+[ "$(id -u)" = 0 ] || exec python3 server.py
+exec s6-setuidgid hermes python3 server.py

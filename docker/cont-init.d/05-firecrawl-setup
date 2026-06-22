@@ -1,0 +1,49 @@
+#!/command/with-contenv sh
+# shellcheck shell=sh
+#
+# 修正 firecrawl-proxy 相关目录的归属，确保 s6-rc 中以 hermes 身份启动
+# 的 firecrawl-proxy / firecrawl-proxy-log 服务能正常读写。
+#
+# 背景：基础镜像 hermes-agent 的 stage2-hook 已在容器启动时把 /opt/data
+# 顶层及已知子目录 chown 给 hermes，但不覆盖 /opt/firecrawl-proxy 源码
+# 目录（由构建期 git clone 创建）和 /opt/data/logs 下的 firecrawl-proxy
+# 日志子目录。
+#
+# 因此本钩子在 stage2-hook 完成 UID 重映射后补齐：
+#
+#   * FIRECRAWL_PROXY_DIR             (默认 /opt/firecrawl-proxy)  ── 构建期 git clone
+#                                                                    产出的源码与缓存
+#   * /opt/data/logs/firecrawl-proxy                             ── 运行期日志落盘
+#   * FIRECRAWL_PROXY_ENV_FILE        (默认 /opt/data/firecrawl.env) ── API Key 配置文件
+#
+# 处理策略：
+#   - 顶层 mkdir -p 保证目录存在，避免服务首启时以 hermes 身份 mkdir 撞 EACCES
+#   - chown -R hermes:hermes（这些子树由 hermes 独占管理）
+#   - 失败时仅告警不 fail，与 stage2-hook 在 rootless 场景的处理一致
+#
+# 命名按字典序排在 04-webui-setup 之后；这样 stage2 → supervise-perms →
+# reconcile-profiles → rtk-init → webui-setup → firecrawl-setup 依次完成。
+
+set -eu
+
+: "${FIRECRAWL_PROXY_DIR:=/opt/firecrawl-proxy}"
+
+# 非 root 启动的容器（例如 rootless podman / 显式 --user）已无 CAP_CHOWN，
+# 直接跳过：宿主侧应自行保证目录归属正确。
+if [ "$(id -u)" != 0 ]; then
+    echo "[05-firecrawl-setup] not root — skipping chown"
+    exit 0
+fi
+
+# /opt/data/logs 可能在 volume 首次挂载时不存在，先 mkdir -p 再 chown。
+# 源码目录由构建期 git clone 创建，这里不再 mkdir。
+mkdir -p "/opt/data/logs/firecrawl-proxy"
+
+for dir in \
+    "$FIRECRAWL_PROXY_DIR" \
+    "/opt/data/logs/firecrawl-proxy" \
+; do
+    [ -e "$dir" ] || continue
+    chown -R hermes:hermes "$dir" 2>/dev/null || \
+        echo "[05-firecrawl-setup] Warning: chown $dir failed (rootless container?) — continuing"
+done

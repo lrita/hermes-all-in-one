@@ -1,0 +1,24 @@
+#!/command/with-contenv sh
+# shellcheck shell=sh
+# Firecrawl Proxy logger service.
+#
+# Consumes firecrawl-proxy's stdout/stderr (via s6-rc producer-for /
+# consumer-for wiring) and persists them with rotation to
+# /opt/data/logs/firecrawl-proxy.
+#
+# 参考 hermes-webui-log 的写法：
+# - 通过 with-contenv 在运行时解析路径，避免把构建期路径硬编码进脚本。
+# - 使用 s6-log n10 s1000000 T 做按大小滚动 + ISO 时间戳。
+
+export HOME=/opt/data
+
+log_dir="/opt/data/logs/firecrawl-proxy"
+
+mkdir -p "$log_dir"
+chown -R hermes:hermes "$log_dir" 2>/dev/null || true
+
+# 参数说明：
+#   n10        最多保留 10 份归档日志
+#   s1000000   单文件超过 ~1MB 触发滚动
+#   T          每行前置 ISO 8601 本地时间戳
+exec s6-setuidgid hermes s6-log n10 s1000000 T "$log_dir"
