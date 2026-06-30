@@ -1,8 +1,7 @@
 # hermes-all-in-one
 
-容器内有3个端口服务：
+容器内有2个端口服务：
 
-- hermes-webui: 8787
 - hermes-dashboard: 9119
 - hermes-api-server: 8642
 
@@ -18,7 +17,6 @@ docker build -t hermes-all-in-one:latest -f Dockerfile .
 
 ```bash
 docker run -d --name hermes-all-in-one \
-    -p 8787:8787 \
     -p 9119:9119 \
     -p 8642:8642 \
     hermes-all-in-one:latest

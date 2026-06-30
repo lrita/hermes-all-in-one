@@ -6,9 +6,7 @@
 # consumer-for wiring) and persists them with rotation to
 # /opt/data/logs/firecrawl-proxy.
 #
-# 参考 hermes-webui-log 的写法：
-# - 通过 with-contenv 在运行时解析路径，避免把构建期路径硬编码进脚本。
-# - 使用 s6-log n10 s1000000 T 做按大小滚动 + ISO 时间戳。
+# 使用 s6-log n10 s1000000 T 做按大小滚动 + ISO 时间戳。
 
 export HOME=/opt/data
 

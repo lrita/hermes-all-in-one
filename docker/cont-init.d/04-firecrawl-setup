@@ -21,8 +21,8 @@
 #   - chown -R hermes:hermes（这些子树由 hermes 独占管理）
 #   - 失败时仅告警不 fail，与 stage2-hook 在 rootless 场景的处理一致
 #
-# 命名按字典序排在 04-webui-setup 之后；这样 stage2 → supervise-perms →
-# reconcile-profiles → rtk-init → webui-setup → firecrawl-setup 依次完成。
+# 命名按字典序排在 03-rtk-init 之后；这样 stage2 → supervise-perms →
+# reconcile-profiles → rtk-init → firecrawl-setup 依次完成。
 
 set -eu
 
@@ -31,7 +31,7 @@ set -eu
 # 非 root 启动的容器（例如 rootless podman / 显式 --user）已无 CAP_CHOWN，
 # 直接跳过：宿主侧应自行保证目录归属正确。
 if [ "$(id -u)" != 0 ]; then
-    echo "[05-firecrawl-setup] not root — skipping chown"
+    echo "[04-firecrawl-setup] not root — skipping chown"
     exit 0
 fi
 
@@ -45,5 +45,5 @@ for dir in \
 ; do
     [ -e "$dir" ] || continue
     chown -R hermes:hermes "$dir" 2>/dev/null || \
-        echo "[05-firecrawl-setup] Warning: chown $dir failed (rootless container?) — continuing"
+        echo "[04-firecrawl-setup] Warning: chown $dir failed (rootless container?) — continuing"
 done
