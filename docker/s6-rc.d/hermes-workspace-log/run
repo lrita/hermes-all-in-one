@@ -1,0 +1,22 @@
+#!/command/with-contenv sh
+# shellcheck shell=sh
+# Hermes Workspace logger service.
+#
+# Consumes hermes-workspace's stdout/stderr (via s6-rc producer-for /
+# consumer-for wiring) and persists them with rotation to
+# /opt/data/logs/hermes-workspace.
+#
+# 使用 s6-log n10 s1000000 T 做按大小滚动 + ISO 时间戳。
+
+export HOME=/opt/data
+
+log_dir="/opt/data/logs/hermes-workspace"
+
+mkdir -p "$log_dir"
+chown -R hermes:hermes "$log_dir" 2>/dev/null || true
+
+# 参数说明：
+#   n10        最多保留 10 份归档日志
+#   s1000000   单文件超过 ~1MB 触发滚动
+#   T          每行前置 ISO 8601 本地时间戳
+exec s6-setuidgid hermes s6-log n10 s1000000 T "$log_dir"

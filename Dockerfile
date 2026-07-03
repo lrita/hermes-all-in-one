@@ -1,3 +1,11 @@
+# ------------------------------------------------------------------------------
+# hermes-workspace 产物来源镜像
+#
+# 仅用于向最终镜像拷贝其构建产物 /app（Node.js 应用），运行时依赖的 Node.js
+# 由最终镜像自带，无需从此 stage 拷贝 node 运行时。
+# ------------------------------------------------------------------------------
+FROM ghcr.io/outsourc-e/hermes-workspace:latest AS hermes-workspace
+
 # 构建最终的 All-in-One 镜像
 FROM nousresearch/hermes-agent:latest
 
@@ -10,6 +18,27 @@ ENV LANG=C.UTF-8 \
     PYTHONUNBUFFERED=1 \
     PYTHONIOENCODING=utf-8 \
     PATH="/opt/hermes/.venv/bin:${PATH}"
+
+# ------------------------------------------------------------------------------
+# API Server / Dashboard 相关环境变量
+#
+# - API_SERVER_ENABLED: 开启 hermes-api-server（监听 8642 端口）。
+# - HERMES_DASHBOARD: 置 1 开启 hermes-dashboard（监听 9119 端口）。
+# - HERMES_DASHBOARD_HOST: hermes-dashboard 监听地址。
+# - API_SERVER_KEY: API 访问密钥，不在镜像中预置，运行时通过
+#   `docker run -e API_SERVER_KEY=xxx` 传入。
+# ------------------------------------------------------------------------------
+ENV API_SERVER_ENABLED=true \
+    HERMES_DASHBOARD=1 \
+    HERMES_DASHBOARD_HOST=127.0.0.1
+
+# ------------------------------------------------------------------------------
+# hermes-workspace 安装目录（构建期从 hermes-workspace 镜像拷贝产物到此）。
+# 运行时业务环境变量（HERMES_API_URL / HERMES_DASHBOARD_URL / COOKIE_SECURE /
+# HERMES_API_TOKEN / HERMES_WORKSPACE_DIR / HOST / PORT）在 s6 服务的 run
+# 脚本中设置，因其依赖运行时传入的 API_SERVER_KEY。
+# ------------------------------------------------------------------------------
+ENV HERMES_WORKSPACE_APP_DIR=/opt/app
 
 # ------------------------------------------------------------------------------
 # Firecrawl Proxy 相关环境变量
@@ -40,6 +69,7 @@ RUN apt-get update \
         xz-utils \
         tree \
         fd-find \
+        jq \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* \
     && ln -sf "$(command -v fdfind)" /usr/local/bin/fd
@@ -62,7 +92,8 @@ RUN echo "export PATH=${PATH}:\$PATH" > /etc/profile.d/adding_path.sh \
 COPY docker/s6-rc.d/        /etc/s6-overlay/s6-rc.d/
 COPY docker/cont-init.d/03-rtk-init  /etc/cont-init.d/03-rtk-init
 COPY docker/cont-init.d/04-firecrawl-setup /etc/cont-init.d/04-firecrawl-setup
-RUN chmod 0755 /etc/cont-init.d/03-rtk-init /etc/cont-init.d/04-firecrawl-setup
+COPY docker/cont-init.d/05-workspace-setup /etc/cont-init.d/05-workspace-setup
+RUN chmod 0755 /etc/cont-init.d/03-rtk-init /etc/cont-init.d/04-firecrawl-setup /etc/cont-init.d/05-workspace-setup
 
 # ------------------------------------------------------------------------------
 # 安装 Firecrawl optional dependency
@@ -90,3 +121,17 @@ RUN git clone --depth=1 https://github.com/lrita/firecrawl_proxy.git "$FIRECRAWL
     && cd "$FIRECRAWL_PROXY_DIR" \
     && uv pip install --no-cache-dir -e . \
     && chown -R hermes:hermes "$FIRECRAWL_PROXY_DIR" /opt/hermes/.venv
+
+# ------------------------------------------------------------------------------
+# 拷贝 hermes-workspace 产物
+#
+# - 从 hermes-workspace 镜像拷贝其构建产物 /app 到 /opt/app（含 dist、
+#   node_modules、server-entry.js、skills 等）。
+# - 当前 Docker 版本不支持 COPY --chown，故拷贝后单独执行 chown，使运行时
+#   以 hermes 用户启动的 hermes-workspace 服务能正常读写。
+# - 运行时 Node.js 由基础镜像自带，无需从来源镜像拷贝 node。
+# ------------------------------------------------------------------------------
+COPY --from=hermes-workspace /app "$HERMES_WORKSPACE_APP_DIR"
+
+RUN chown -R hermes:hermes "$HERMES_WORKSPACE_APP_DIR"
+

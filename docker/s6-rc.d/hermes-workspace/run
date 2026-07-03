@@ -1,0 +1,42 @@
+#!/command/with-contenv sh
+# shellcheck shell=sh
+# Hermes Workspace service.
+#
+# Long-running supervised service that boots the hermes-workspace Node.js 应用
+# （产物来自 ghcr.io/outsourc-e/hermes-workspace，构建期拷贝到 /opt/app）。
+#
+# 对外监听 8008 端口，向后端 hermes-api-server(8642) / hermes-dashboard(9119)
+# 发起请求。
+
+export HOME=/opt/data
+
+: "${HERMES_WORKSPACE_APP_DIR:=/opt/app}"
+
+# ------------------------------------------------------------------------------
+# hermes-workspace 运行时环境变量
+#
+# HERMES_API_TOKEN 取运行时传入的 API_SERVER_KEY，与 hermes-api-server 的
+# 鉴权密钥保持一致；若未传入则为空（api-server 亦未开启鉴权）。
+# ------------------------------------------------------------------------------
+export HERMES_API_URL=http://127.0.0.1:8642
+export HERMES_DASHBOARD_URL=http://127.0.0.1:9119
+export COOKIE_SECURE=0
+export HERMES_API_TOKEN="${API_SERVER_KEY}"
+export HERMES_WORKSPACE_DIR=/opt/data/workspace
+export HOST=0.0.0.0
+export PORT=8008
+
+cd "${HERMES_WORKSPACE_APP_DIR}" || exit 1
+
+# Redirect stderr to stdout so the s6-rc consumer (hermes-workspace-log)
+# receives both streams via the producer/consumer pipe — s6-log only
+# reads stdout.
+exec 2>&1
+
+# Run as hermes user when root; when container runs rootless (no CAP_SETGID),
+# s6-setuidgid's setgroups() fails causing s6 restart loop, so exec directly.
+# Exec replaces shell so s6-supervise directly tracks the node process
+# (clean signals, accurate PID).
+[ "$(id -u)" = 0 ] || exec node --max-old-space-size=2048 server-entry.js
+
+exec s6-setuidgid hermes node --max-old-space-size=2048 server-entry.js
