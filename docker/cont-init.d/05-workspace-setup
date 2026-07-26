@@ -5,16 +5,16 @@
 # 的 hermes-workspace / hermes-workspace-log 服务能正常读写。
 #
 # 背景：基础镜像 hermes-agent 的 stage2-hook 已在容器启动时把 /opt/data
-# 顶层及已知子目录 chown 给 hermes，但不覆盖 /opt/app 产物目录（由构建期
-# COPY 创建，归 root）、/opt/data/logs 下的 hermes-workspace 日志子目录，
-# 以及 hermes-workspace 的数据目录 /opt/data/workspace。
+# 顶层及已知子目录 chown 给 hermes。hermes-workspace 应用产物目录
+# ($HERMES_WORKSPACE_APP_DIR) 已在 Dockerfile 构建期执行过 chown，无需重复。
+# 本钩子仅处理运行时新创建的日志与数据子目录。
 #
 # 因此本钩子在 stage2-hook 完成 UID 重映射后补齐：
 #
-#   * HERMES_WORKSPACE_APP_DIR        (默认 /opt/app)               ── 构建期 COPY
-#                                                                    产出的应用产物
 #   * /opt/data/logs/hermes-workspace                             ── 运行期日志落盘
 #   * /opt/data/workspace                                         ── 工作区数据目录
+#
+# 注意：$HERMES_WORKSPACE_APP_DIR 已在 Dockerfile 第136行中 chown，此处不再重复。
 #
 # 处理策略：
 #   - 顶层 mkdir -p 保证目录存在，避免服务首启时以 hermes 身份 mkdir 撞 EACCES
@@ -39,7 +39,6 @@ fi
 mkdir -p "/opt/data/logs/hermes-workspace" "/opt/data/workspace"
 
 for dir in \
-    "$HERMES_WORKSPACE_APP_DIR" \
     "/opt/data/logs/hermes-workspace" \
     "/opt/data/workspace" \
 ; do

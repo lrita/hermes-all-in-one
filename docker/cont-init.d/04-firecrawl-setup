@@ -5,16 +5,16 @@
 # 的 firecrawl-proxy / firecrawl-proxy-log 服务能正常读写。
 #
 # 背景：基础镜像 hermes-agent 的 stage2-hook 已在容器启动时把 /opt/data
-# 顶层及已知子目录 chown 给 hermes，但不覆盖 /opt/firecrawl-proxy 源码
-# 目录（由构建期 git clone 创建）和 /opt/data/logs 下的 firecrawl-proxy
-# 日志子目录。
+# 顶层及已知子目录 chown 给 hermes。firecrawl-proxy 源码目录
+# ($FIRECRAWL_PROXY_DIR) 已在 Dockerfile 构建期执行过 chown，无需重复。
+# 本钩子仅处理运行时新创建的日志子目录。
 #
 # 因此本钩子在 stage2-hook 完成 UID 重映射后补齐：
 #
-#   * FIRECRAWL_PROXY_DIR             (默认 /opt/firecrawl-proxy)  ── 构建期 git clone
-#                                                                    产出的源码与缓存
 #   * /opt/data/logs/firecrawl-proxy                             ── 运行期日志落盘
 #   * FIRECRAWL_PROXY_ENV_FILE        (默认 /opt/data/firecrawl.env) ── API Key 配置文件
+#
+# 注意：$FIRECRAWL_PROXY_DIR 已在 Dockerfile 中 chown，此处不再重复。
 #
 # 处理策略：
 #   - 顶层 mkdir -p 保证目录存在，避免服务首启时以 hermes 身份 mkdir 撞 EACCES
@@ -40,7 +40,6 @@ fi
 mkdir -p "/opt/data/logs/firecrawl-proxy"
 
 for dir in \
-    "$FIRECRAWL_PROXY_DIR" \
     "/opt/data/logs/firecrawl-proxy" \
 ; do
     [ -e "$dir" ] || continue
