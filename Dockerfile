@@ -87,6 +87,12 @@ RUN echo "export PATH=${PATH}:\$PATH" > /etc/profile.d/adding_path.sh \
     && chmod 644 /etc/profile.d/adding_path.sh
 
 # ------------------------------------------------------------------------------
+# 对 hermes-agent 源码打补丁
+# ------------------------------------------------------------------------------
+# COPY patch/81734.patch /opt/hermes/patch/81734.patch
+# RUN cd /opt/hermes && patch -p1 < patch/81734.patch
+
+# ------------------------------------------------------------------------------
 # 拷贝 s6-overlay 服务配置
 # ------------------------------------------------------------------------------
 COPY docker/s6-rc.d/        /etc/s6-overlay/s6-rc.d/
@@ -96,16 +102,43 @@ COPY docker/cont-init.d/05-workspace-setup /etc/cont-init.d/05-workspace-setup
 RUN chmod 0755 /etc/cont-init.d/03-rtk-init /etc/cont-init.d/04-firecrawl-setup /etc/cont-init.d/05-workspace-setup
 
 # ------------------------------------------------------------------------------
-# 安装 Firecrawl optional dependency
+# 安装 Firecrawl optional dependency（版本从基础镜像的 pyproject.toml 解析）
 #
-# - hermes-agent 的 pyproject.toml 中 firecrawl = ["firecrawl-py==4.17.0"]
-#   是 [project.optional-dependencies] 中的可选依赖，需显式指定 --extra 安装。
+# - hermes-agent 的 pyproject.toml 中 firecrawl 是 [project.optional-dependencies]
+#   中的可选依赖，且未被 all extra 包含，故官方基础镜像的 sealed venv 中不含。
+# - 不能用 `uv pip install ".[firecrawl]"`：`.` 指向 /opt/hermes（hermes-agent
+#   本体），非 editable 安装会触发 PEP 517 build_wheel，撞上 setup.py 里的
+#   构建防护（HERMES_NIX_BUILD != 1 时禁止打 wheel/sdist）而报错。
+#   hermes 本体在基础镜像已用 editable 装好，此处只需补装 extra 对应的依赖包。
+# - 不写死版本：构建期读取 /opt/hermes/pyproject.toml 的 firecrawl extra 规格，
+#   upstream 更新版本时随基础镜像自动跟随。
 # - 安装在 /opt/hermes 的共享 venv 中。
 # - 必须在 clone firecrawl-proxy 之前完成，否则 firecrawl-proxy 运行时会因
 #   缺少 firecrawl-py 报 ModuleNotFoundError。
 # ------------------------------------------------------------------------------
-RUN cd /opt/hermes \
-    && uv pip install --no-cache-dir ".[firecrawl]"
+RUN /opt/hermes/.venv/bin/python -c "import tomllib, pathlib; pathlib.Path('/tmp/firecrawl-reqs.txt').write_text('\n'.join(tomllib.loads(pathlib.Path('/opt/hermes/pyproject.toml').read_text())['project']['optional-dependencies']['firecrawl']) + '\n')" \
+    && uv pip install --no-cache-dir -r /tmp/firecrawl-reqs.txt \
+    && rm -f /tmp/firecrawl-reqs.txt
+
+# ------------------------------------------------------------------------------
+# 安装 DingTalk 平台 optional dependency（版本从基础镜像的 pyproject.toml 解析）
+#
+# - 不写死版本：构建期读取基础镜像内 hermes-agent 的 /opt/hermes/pyproject.toml，
+#   取其 [project.optional-dependencies].dingtalk 的依赖规格交给 uv pip install。
+#   upstream 更新 extra 版本时，重建镜像即自动跟随，无需改动本 Dockerfile。
+# - dingtalk extra 未被 all / messaging extra 包含（2026-05-12 起改为运行时懒装），
+#   故官方基础镜像的 sealed venv 中不含，容器内 lazy-install 又受网络与只读限制。
+# - 与 firecrawl 同理，不能走 `uv pip install ".[dingtalk]"`（非 editable 会触发
+#   PEP 517 build_wheel 撞上 setup.py 构建防护），只补装 extra 对应的依赖包到
+#   /opt/hermes 共享 venv。
+# - 经 requirements 文件中转，避免 shell 对 PEP 508 marker（含空格/分号）的分词破坏
+#   （requires-python >= 3.11，tomllib 为标准库）。
+# - 置于下方 Firecrawl Proxy 步骤之前，以复用其
+#   chown -R hermes:hermes /opt/hermes/.venv（无需单独 chown）。
+# ------------------------------------------------------------------------------
+RUN /opt/hermes/.venv/bin/python -c "import tomllib, pathlib; pathlib.Path('/tmp/dingtalk-reqs.txt').write_text('\n'.join(tomllib.loads(pathlib.Path('/opt/hermes/pyproject.toml').read_text())['project']['optional-dependencies']['dingtalk']) + '\n')" \
+    && uv pip install --no-cache-dir -r /tmp/dingtalk-reqs.txt \
+    && rm -f /tmp/dingtalk-reqs.txt
 
 # ------------------------------------------------------------------------------
 # 克隆 Firecrawl Proxy 并安装依赖
