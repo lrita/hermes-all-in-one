@@ -88,9 +88,13 @@ RUN echo "export PATH=${PATH}:\$PATH" > /etc/profile.d/adding_path.sh \
 
 # ------------------------------------------------------------------------------
 # 对 hermes-agent 源码打补丁
+#
+# 仅应用 dingtalk.patch（只修改 plugins/platforms/dingtalk/adapter.py 的
+# _standalone_send，加入机器人 API 主动发送与 webhook 回退）；不使用
+# dingtalk2.patch，避免引入 tests/website 等基础镜像中不存在的文件。
 # ------------------------------------------------------------------------------
-# COPY patch/81734.patch /opt/hermes/patch/81734.patch
-# RUN cd /opt/hermes && patch -p1 < patch/81734.patch
+COPY patch/dingtalk.patch /opt/hermes/patch/dingtalk.patch
+RUN cd /opt/hermes && patch -p1 < patch/dingtalk.patch
 
 # ------------------------------------------------------------------------------
 # 拷贝 s6-overlay 服务配置
@@ -100,6 +104,26 @@ COPY docker/cont-init.d/03-rtk-init  /etc/cont-init.d/03-rtk-init
 COPY docker/cont-init.d/04-firecrawl-setup /etc/cont-init.d/04-firecrawl-setup
 COPY docker/cont-init.d/05-workspace-setup /etc/cont-init.d/05-workspace-setup
 RUN chmod 0755 /etc/cont-init.d/03-rtk-init /etc/cont-init.d/04-firecrawl-setup /etc/cont-init.d/05-workspace-setup
+
+# ------------------------------------------------------------------------------
+# 暴露基础镜像 PM 内置的 uv
+#
+# - 新版 hermes-agent 基础镜像把 uv 当作 PM 内部构建工具（Package.on_path=False），
+#   只安装到 $HERMES_RUNTIME_DIR（/opt/hermes/tools）下的版本化目录，PATH 中
+#   不再提供 uv，因此直接执行 `uv ...` 会 command not found。
+# - 用 PM 公开 API pm.uv_launcher("uv") 解析实际路径，不硬编码版本号：基础
+#   镜像升级 uv 后重建镜像会自动跟随；解析失败则构建立即失败，避免依赖被
+#   静默装进错误的环境。
+# - 软链到 /usr/local/bin，后续 RUN 以及容器内交互式执行 `uv` 均可直接使用。
+#   注意：不额外下载/安装第二个 uv，避免与基础镜像 pm/lock.json 锁定的版本
+#   产生双版本来源。
+# ------------------------------------------------------------------------------
+RUN UV_BIN="$(cd /opt/hermes && python3 -c 'import sys; from pm import uv_launcher; p = uv_launcher("uv"); print(p) if p else sys.exit("uv not found in PM store")')" \
+    && test -n "$UV_BIN" \
+    && test -x "$UV_BIN" \
+    && ln -sf "$UV_BIN" /usr/local/bin/uv \
+    && if [ -x "$(dirname "$UV_BIN")/uvx" ]; then ln -sf "$(dirname "$UV_BIN")/uvx" /usr/local/bin/uvx; fi \
+    && uv --version
 
 # ------------------------------------------------------------------------------
 # 安装 Firecrawl optional dependency（版本从基础镜像的 pyproject.toml 解析）
@@ -117,7 +141,7 @@ RUN chmod 0755 /etc/cont-init.d/03-rtk-init /etc/cont-init.d/04-firecrawl-setup 
 #   缺少 firecrawl-py 报 ModuleNotFoundError。
 # ------------------------------------------------------------------------------
 RUN /opt/hermes/.venv/bin/python -c "import tomllib, pathlib; pathlib.Path('/tmp/firecrawl-reqs.txt').write_text('\n'.join(tomllib.loads(pathlib.Path('/opt/hermes/pyproject.toml').read_text())['project']['optional-dependencies']['firecrawl']) + '\n')" \
-    && uv pip install --no-cache-dir -r /tmp/firecrawl-reqs.txt \
+    && uv pip install --no-cache-dir --python /opt/hermes/.venv/bin/python -r /tmp/firecrawl-reqs.txt \
     && rm -f /tmp/firecrawl-reqs.txt
 
 # ------------------------------------------------------------------------------
@@ -137,7 +161,7 @@ RUN /opt/hermes/.venv/bin/python -c "import tomllib, pathlib; pathlib.Path('/tmp
 #   chown -R hermes:hermes /opt/hermes/.venv（无需单独 chown）。
 # ------------------------------------------------------------------------------
 RUN /opt/hermes/.venv/bin/python -c "import tomllib, pathlib; pathlib.Path('/tmp/dingtalk-reqs.txt').write_text('\n'.join(tomllib.loads(pathlib.Path('/opt/hermes/pyproject.toml').read_text())['project']['optional-dependencies']['dingtalk']) + '\n')" \
-    && uv pip install --no-cache-dir -r /tmp/dingtalk-reqs.txt \
+    && uv pip install --no-cache-dir --python /opt/hermes/.venv/bin/python -r /tmp/dingtalk-reqs.txt \
     && rm -f /tmp/dingtalk-reqs.txt
 
 # ------------------------------------------------------------------------------
@@ -152,8 +176,16 @@ RUN /opt/hermes/.venv/bin/python -c "import tomllib, pathlib; pathlib.Path('/tmp
 # ------------------------------------------------------------------------------
 RUN git clone --depth=1 https://github.com/lrita/firecrawl_proxy.git "$FIRECRAWL_PROXY_DIR" \
     && cd "$FIRECRAWL_PROXY_DIR" \
-    && uv pip install --no-cache-dir -e . \
+    && uv pip install --no-cache-dir --python /opt/hermes/.venv/bin/python -e . \
     && chown -R hermes:hermes "$FIRECRAWL_PROXY_DIR" /opt/hermes/.venv
+
+# ------------------------------------------------------------------------------
+# 校验补充依赖已装入 hermes-agent 的共享 venv
+#
+# 构建期 fail-fast：避免镜像构建成功、运行时才在 firecrawl-proxy 或
+# DingTalk 适配器里报 ModuleNotFoundError。
+# ------------------------------------------------------------------------------
+RUN /opt/hermes/.venv/bin/python -c "import firecrawl, dingtalk_stream, alibabacloud_dingtalk, qrcode"
 
 # ------------------------------------------------------------------------------
 # 拷贝 hermes-workspace 产物
